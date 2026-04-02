@@ -61,29 +61,49 @@ def main():
     st.title("Product Analytics Dashboard")
     st.markdown("Module-wise and company-wise activity insights")
 
-    # Load data
-    df_raw = load_data()
-    entries_raw = load_entries_data()
+    # Load data (first load can take 1-2 min with large Excel files on cloud)
+    with st.spinner("Loading data... Please wait 1-2 minutes on first visit."):
+        df_raw = load_data()
+        entries_raw = load_entries_data()
 
-    # Year filter
+    # Top filters
     year = st.selectbox(
         "Filter by year",
         ["All", "2024", "2025", "2026"],
         index=0,
     )
-    df = apply_year_filter(df_raw, year)
+    df_year = apply_year_filter(df_raw, year)
     df_entries = apply_year_filter(entries_raw.copy(), year)
+
+    action_options = sorted(df_year["action"].dropna().unique().tolist())
+    selected_actions = st.multiselect(
+        "Filter by action type",
+        options=action_options,
+        default=action_options,
+    )
+
+    module_options = sorted(df_year["section"].dropna().unique().tolist())
+    selected_modules = st.multiselect(
+        "Filter by module",
+        options=module_options,
+        default=module_options,
+    )
+
+    df_actions = df_year[
+        df_year["action"].isin(selected_actions) & df_year["section"].isin(selected_modules)
+    ]
+    st.caption("Action Type and Module filters apply only to action analytics.")
 
     # KPI cards
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("Total Actions", f"{len(df):,}")
+        st.metric("Total Actions", f"{len(df_actions):,}")
     with col2:
-        st.metric("Total Companies", df["company_name"].nunique())
+        st.metric("Total Companies", df_actions["company_name"].nunique())
     with col3:
-        st.metric("Total Modules", df["section"].nunique())
+        st.metric("Total Modules", df_actions["section"].nunique())
     with col4:
-        st.metric("Total User Roles", df["user_role"].nunique())
+        st.metric("Total User Roles", df_actions["user_role"].nunique())
     with col5:
         st.metric("Total Data Entries", f"{len(df_entries):,}")
 
@@ -94,7 +114,7 @@ def main():
     all_companies = sorted(
         df_raw[df_raw["year"].isin([2024, 2025, 2026])]["company_name"].unique().tolist()
     )
-    counted = df.groupby("company_name").size().reindex(all_companies, fill_value=0)
+    counted = df_actions.groupby("company_name").size().reindex(all_companies, fill_value=0)
     company_counts = counted.reset_index(name="action_count").sort_values(
         "action_count", ascending=True
     )
@@ -125,7 +145,7 @@ def main():
     trend_label = "Year-wise" if year == "All" else f"Month-wise ({year})"
     st.markdown(f"##### Action Count Over Time ({trend_label})")
     if year == "All":
-        trend_data = df.groupby("year").size().reset_index(name="count")
+        trend_data = df_actions.groupby("year").size().reset_index(name="count")
         trend_data = trend_data.sort_values("year")
         fig_trend = go.Figure(
             data=[
@@ -141,13 +161,18 @@ def main():
             ]
         )
         fig_trend.update_layout(
-            xaxis_title="Year",
+            xaxis=dict(
+                title="Year",
+                type="category",
+                categoryorder="array",
+                categoryarray=["2024", "2025", "2026"],
+            ),
             yaxis_title="Action Count",
             height=350,
             margin=dict(t=40),
         )
     else:
-        month_counts = df.groupby("month").size().reindex(range(1, 13), fill_value=0)
+        month_counts = df_actions.groupby("month").size().reindex(range(1, 13), fill_value=0)
         trend_data = month_counts.reset_index()
         trend_data.columns = ["month", "count"]
         month_names = [
@@ -236,7 +261,12 @@ def main():
             ]
         )
         fig_entries_trend.update_layout(
-            xaxis_title="Year",
+            xaxis=dict(
+                title="Year",
+                type="category",
+                categoryorder="array",
+                categoryarray=["2024", "2025", "2026"],
+            ),
             yaxis_title="Data Entry Count",
             height=350,
             margin=dict(t=40),
@@ -290,7 +320,11 @@ def main():
         insight_label = "All Companies" if selected_company == "All" else selected_company
         st.subheader(f"Insights: {insight_label}")
 
-        df_company = df if selected_company == "All" else df[df["company_name"] == selected_company]
+        df_company = (
+            df_actions
+            if selected_company == "All"
+            else df_actions[df_actions["company_name"] == selected_company]
+        )
 
         section_colors = {
             "Data Manager": "#2E86AB",
@@ -476,7 +510,12 @@ def main():
                         ]
                     )
                     fig_de.update_layout(
-                        xaxis_title="Year",
+                        xaxis=dict(
+                            title="Year",
+                            type="category",
+                            categoryorder="array",
+                            categoryarray=["2024", "2025", "2026"],
+                        ),
                         yaxis_title="Data Entries",
                         height=350,
                     )
@@ -527,7 +566,12 @@ def main():
                             )
                         )
                     fig_de.update_layout(
-                        xaxis_title="Year",
+                        xaxis=dict(
+                            title="Year",
+                            type="category",
+                            categoryorder="array",
+                            categoryarray=["2024", "2025", "2026"],
+                        ),
                         yaxis_title="Data Entries",
                         height=350,
                         legend=dict(orientation="h", yanchor="bottom", y=1.02),
@@ -579,7 +623,12 @@ def main():
                             )
                         )
                     fig_de.update_layout(
-                        xaxis_title="Year",
+                        xaxis=dict(
+                            title="Year",
+                            type="category",
+                            categoryorder="array",
+                            categoryarray=["2024", "2025", "2026"],
+                        ),
                         yaxis_title="Data Entries",
                         height=400,
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=9)),
