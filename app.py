@@ -14,6 +14,7 @@ st.set_page_config(page_title="Product Analytics Dashboard", page_icon="📊", l
 
 # Path to Excel files (same directory as app)
 EXCEL_PATH = Path(__file__).parent / "Product Analytics Data (17th March).xlsx"
+EXCEL_2026_PATH = Path(__file__).parent / "Product Analytics (16th April).xlsx"
 ENTRIES_PATH = Path(__file__).parent / "Product Analytics Data Entries.xlsx"
 
 MONTH_NAMES = [
@@ -24,12 +25,34 @@ MONTH_NAMES = [
 
 @st.cache_data
 def load_data():
-    """Load and preprocess Excel data with caching."""
-    df = pd.read_excel(EXCEL_PATH, sheet_name="data_audit_logs_v2")
-    mo = pd.to_datetime(df["month_of_entry"])
-    df["year"] = mo.dt.year
-    df["month"] = mo.dt.month
-    # Combine "delete" and "deleted" as same action
+    """Load and merge audit-log data from both Excel files.
+
+    The original file (17th March) covers historical data through early 2026.
+    The newer file (16th April) has comprehensive Jan-Mar 2026 action data with
+    explicit year/month columns that reflect when the action happened (the
+    month_of_entry column in that file refers to the data period, not action
+    date).  We drop partial 2026 rows from the old file and replace them with
+    the complete new dataset.
+    """
+    # Historical data — derive year/month from month_of_entry
+    df_old = pd.read_excel(EXCEL_PATH, sheet_name="data_audit_logs_v2")
+    mo = pd.to_datetime(df_old["month_of_entry"])
+    df_old["year"] = mo.dt.year
+    df_old["month"] = mo.dt.month
+    # Drop old (partial) 2026 rows — the new file supersedes them
+    df_old = df_old[df_old["year"] < 2026]
+
+    # New comprehensive 2026 Q1 data — year/month columns already present
+    df_new = pd.read_excel(EXCEL_2026_PATH, sheet_name="data")
+
+    # Align columns and merge
+    shared_cols = [
+        "user_name", "user_role", "company_name", "action", "message",
+        "timestamp", "month_of_entry", "section", "business_unit_name",
+        "my_metric_name", "month", "year",
+    ]
+    df = pd.concat([df_old[shared_cols], df_new[shared_cols]], ignore_index=True)
+
     df["action"] = df["action"].replace("deleted", "delete")
     return df
 
