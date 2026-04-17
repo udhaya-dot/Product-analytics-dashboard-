@@ -100,6 +100,23 @@ def apply_fy_filter(df: pd.DataFrame, fy: str) -> pd.DataFrame:
     return df
 
 
+def smart_multiselect(label, options, key):
+    """Multiselect with an 'All' shortcut that persists across filter changes."""
+    all_opts = ["All"] + list(options)
+
+    if key in st.session_state:
+        valid = [v for v in st.session_state[key] if v in all_opts]
+        if not valid:
+            valid = ["All"]
+        st.session_state[key] = valid
+
+    selected = st.multiselect(label, options=all_opts, default=["All"], key=key)
+
+    if "All" in selected or len(selected) == 0:
+        return list(options)
+    return [s for s in selected if s != "All"]
+
+
 # ── Notes helpers (Google Sheets backend) ──────────────────────────────────
 
 
@@ -169,14 +186,10 @@ def main():
         set(df_year["month"].unique().tolist() + df_entries["month"].unique().tolist())
     )
     month_options = [m for m in FY_MONTH_ORDER if m in available_months]
-    month_labels = {m: MONTH_NAMES[m - 1] for m in month_options}
+    month_display = [MONTH_NAMES[m - 1] for m in month_options]
     with filter_col_mo:
-        selected_month_labels = st.multiselect(
-            "Filter by month",
-            options=[month_labels[m] for m in month_options],
-            default=[month_labels[m] for m in month_options],
-        )
-    selected_months = [m for m in month_options if month_labels[m] in selected_month_labels]
+        selected_month_names = smart_multiselect("Filter by month", month_display, key="filter_month")
+    selected_months = [m for m in month_options if MONTH_NAMES[m - 1] in selected_month_names]
     if selected_months:
         df_year = df_year[df_year["month"].isin(selected_months)]
         df_entries = df_entries[df_entries["month"].isin(selected_months)]
@@ -189,17 +202,13 @@ def main():
     # ── Tab 1: Overview ────────────────────────────────────────────────────
     with tab_overview:
         action_options = sorted(df_year["action"].dropna().unique().tolist())
-        selected_actions = st.multiselect(
-            "Filter by action type",
-            options=action_options,
-            default=action_options,
+        selected_actions = smart_multiselect(
+            "Filter by action type", action_options, key="filter_actions"
         )
 
         module_options = sorted(df_year["section"].dropna().unique().tolist())
-        selected_modules = st.multiselect(
-            "Filter by module",
-            options=module_options,
-            default=module_options,
+        selected_modules = smart_multiselect(
+            "Filter by module", module_options, key="filter_modules"
         )
 
         df_actions = df_year[
