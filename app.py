@@ -154,13 +154,32 @@ def main():
     fy_options = sorted(set(
         df_raw["fy_label"].unique().tolist() + entries_raw["fy_label"].unique().tolist()
     ))
-    selected_fy = st.selectbox(
-        "Filter by financial year",
-        ["All"] + fy_options,
-        index=0,
-    )
+    filter_col_fy, filter_col_mo = st.columns(2)
+    with filter_col_fy:
+        selected_fy = st.selectbox(
+            "Filter by financial year",
+            ["All"] + fy_options,
+            index=0,
+        )
     df_year = apply_fy_filter(df_raw, selected_fy)
     df_entries = apply_fy_filter(entries_raw.copy(), selected_fy)
+
+    # Month filter — show months available in the selected data, ordered Apr-Mar
+    available_months = sorted(
+        set(df_year["month"].unique().tolist() + df_entries["month"].unique().tolist())
+    )
+    month_options = [m for m in FY_MONTH_ORDER if m in available_months]
+    month_labels = {m: MONTH_NAMES[m - 1] for m in month_options}
+    with filter_col_mo:
+        selected_month_labels = st.multiselect(
+            "Filter by month",
+            options=[month_labels[m] for m in month_options],
+            default=[month_labels[m] for m in month_options],
+        )
+    selected_months = [m for m in month_options if month_labels[m] in selected_month_labels]
+    if selected_months:
+        df_year = df_year[df_year["month"].isin(selected_months)]
+        df_entries = df_entries[df_entries["month"].isin(selected_months)]
 
     # ── Tabs ───────────────────────────────────────────────────────────────
     tab_overview, tab_modules, tab_notes = st.tabs(
