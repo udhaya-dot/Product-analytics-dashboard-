@@ -103,14 +103,25 @@ def apply_fy_filter(df: pd.DataFrame, fy: str) -> pd.DataFrame:
 def smart_multiselect(label, options, key):
     """Multiselect with an 'All' shortcut that persists across filter changes."""
     all_opts = ["All"] + list(options)
+    prev_key = f"_prev_{key}"
 
     if key in st.session_state:
-        valid = [v for v in st.session_state[key] if v in all_opts]
-        if not valid:
-            valid = ["All"]
-        st.session_state[key] = valid
+        current = [v for v in st.session_state[key] if v in all_opts]
+        prev = st.session_state.get(prev_key, ["All"])
+
+        if "All" in current and any(v != "All" for v in current):
+            if "All" not in prev:
+                current = ["All"]
+            else:
+                current = [v for v in current if v != "All"]
+
+        if not current:
+            current = ["All"]
+
+        st.session_state[key] = current
 
     selected = st.multiselect(label, options=all_opts, default=["All"], key=key)
+    st.session_state[prev_key] = list(selected)
 
     if "All" in selected or len(selected) == 0:
         return list(options)
