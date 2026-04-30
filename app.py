@@ -23,6 +23,7 @@ st.set_page_config(page_title="Product Analytics Dashboard", page_icon="📊", l
 # Path to Excel files (same directory as app)
 EXCEL_PATH = Path(__file__).parent / "Product Analytics Data (17th March).xlsx"
 EXCEL_2026_PATH = Path(__file__).parent / "Product Analytics (16th April).xlsx"
+EXCEL_APR29_PATH = Path(__file__).parent / "Logs till Apr 29th.xlsx"
 ENTRIES_PATH = Path(__file__).parent / "Product Analytics Data Entries.xlsx"
 
 MONTH_NAMES = [
@@ -44,25 +45,39 @@ def fy_label(year: int, month: int) -> str:
 
 @st.cache_data
 def load_data():
-    """Load and merge audit-log data from both Excel files.
+    """Load and merge audit-log data from all Excel sources.
 
-    The original file (17th March) covers historical data through early 2026.
-    The newer file (16th April) has comprehensive Jan-Mar 2026 action data with
-    explicit year/month columns that reflect when the action happened (the
-    month_of_entry column in that file refers to the data period, not action
-    date).  We drop partial 2026 rows from the old file and replace them with
-    the complete new dataset.
+    Sources:
+    1. 17th March file — historical data (year < 2026)
+    2. 16th April file — comprehensive Jan-Mar 2026 action data
+    3. Logs till Apr 29th — recent actions (Apr 15-29, 2026) including FY 2026-27
     """
     # Historical data — derive year/month from month_of_entry
     df_old = pd.read_excel(EXCEL_PATH, sheet_name="data_audit_logs_v2")
     mo = pd.to_datetime(df_old["month_of_entry"])
     df_old["year"] = mo.dt.year
     df_old["month"] = mo.dt.month
-    # Drop old (partial) 2026 rows — the new file supersedes them
     df_old = df_old[df_old["year"] < 2026]
 
-    # New comprehensive 2026 Q1 data — year/month columns already present
-    df_new = pd.read_excel(EXCEL_2026_PATH, sheet_name="data")
+    # Comprehensive 2026 Q1 data — year/month columns already present
+    df_q1 = pd.read_excel(EXCEL_2026_PATH, sheet_name="data")
+
+    # Build user_name → user_role lookup from existing sources
+    role_map = {}
+    for src in [df_old, df_q1]:
+        if "user_role" in src.columns and "user_name" in src.columns:
+            pairs = src[["user_name", "user_role"]].dropna().drop_duplicates()
+            for _, r in pairs.iterrows():
+                role_map[r["user_name"]] = r["user_role"]
+
+    # Apr 29th logs — new actions including FY 2026-27
+    df_apr29 = pd.read_excel(EXCEL_APR29_PATH, sheet_name="data_audit_logs")
+    mo_apr = pd.to_datetime(df_apr29["month_of_entry"])
+    df_apr29["year"] = mo_apr.dt.year
+    df_apr29["month"] = mo_apr.dt.month
+    df_apr29["user_role"] = df_apr29["user_name"].map(role_map).fillna("Unknown")
+    if "metric_name" in df_apr29.columns:
+        df_apr29 = df_apr29.rename(columns={"metric_name": "my_metric_name"})
 
     # Align columns and merge
     shared_cols = [
@@ -70,9 +85,22 @@ def load_data():
         "timestamp", "month_of_entry", "section", "business_unit_name",
         "my_metric_name", "month", "year",
     ]
-    df = pd.concat([df_old[shared_cols], df_new[shared_cols]], ignore_index=True)
+    for col in shared_cols:
+        for src in [df_old, df_q1, df_apr29]:
+            if col not in src.columns:
+                src[col] = None
 
-    df["action"] = df["action"].replace("deleted", "delete")
+    df = pd.concat(
+        [df_old[shared_cols], df_q1[shared_cols], df_apr29[shared_cols]],
+        ignore_index=True,
+    )
+
+    df["action"] = df["action"].replace({
+        "deleted": "delete",
+        "METRIC ASSIGN": "metric assign",
+        "METRIC UNASSIGN": "metric unassign",
+        "OTP Login": "otp login",
+    })
     df["fy_label"] = df.apply(lambda r: fy_label(int(r["year"]), int(r["month"])), axis=1)
     return df
 
@@ -87,7 +115,7 @@ def load_entries_data():
         "entry_month": "month",
         "entry_year": "year",
     })
-    df = df[df["year"].isin([2024, 2025, 2026])]
+    df = df[df["year"] >= 2024]
     df["user_role"] = df["user_role"].fillna("Unknown")
     df["fy_label"] = df.apply(lambda r: fy_label(int(r["year"]), int(r["month"])), axis=1)
     return df
@@ -245,7 +273,7 @@ def main():
         # Company-wise horizontal bar chart (show all companies)
         st.subheader("Company-wise Activity")
         all_companies = sorted(
-            df_raw[df_raw["year"].isin([2024, 2025, 2026])]["company_name"].unique().tolist()
+            df_raw[df_raw["year"] >= 2024]["company_name"].unique().tolist()
         )
         counted = df_actions.groupby("company_name").size().reindex(all_companies, fill_value=0)
         company_counts = counted.reset_index(name="action_count").sort_values(
@@ -333,7 +361,7 @@ def main():
         # Company-wise Data Entries
         st.subheader("Company-wise Data Entries")
         all_companies_entries = sorted(
-            entries_raw[entries_raw["year"].isin([2024, 2025, 2026])]["company_name"].unique().tolist()
+            entries_raw[entries_raw["year"] >= 2024]["company_name"].unique().tolist()
         )
         entries_counted = (
             df_entries.groupby("company_name")
@@ -432,8 +460,8 @@ def main():
         st.plotly_chart(fig_entries_trend, use_container_width=True)
 
         # Company selection for drill-down (union of actions and entries companies)
-        actions_companies = df_raw[df_raw["year"].isin([2024, 2025, 2026])]["company_name"].unique().tolist()
-        entries_companies = entries_raw[entries_raw["year"].isin([2024, 2025, 2026])]["company_name"].unique().tolist()
+        actions_companies = df_raw[df_raw["year"] >= 2024]["company_name"].unique().tolist()
+        entries_companies = entries_raw[entries_raw["year"] >= 2024]["company_name"].unique().tolist()
         company_list = sorted(list(set(actions_companies + entries_companies)))
         companies = ["-- Select a company --", "All"] + company_list
         selected_company = st.selectbox(
@@ -860,8 +888,8 @@ token_uri = "https://oauth2.googleapis.com/token"
             )
         else:
             # Build the company list for the Add Note form
-            actions_co = df_raw[df_raw["year"].isin([2024, 2025, 2026])]["company_name"].unique().tolist()
-            entries_co = entries_raw[entries_raw["year"].isin([2024, 2025, 2026])]["company_name"].unique().tolist()
+            actions_co = df_raw[df_raw["year"] >= 2024]["company_name"].unique().tolist()
+            entries_co = entries_raw[entries_raw["year"] >= 2024]["company_name"].unique().tolist()
             notes_co = notes_df["company"].dropna().unique().tolist() if len(notes_df) > 0 else []
             all_note_companies = sorted(set(actions_co + entries_co + notes_co))
 
